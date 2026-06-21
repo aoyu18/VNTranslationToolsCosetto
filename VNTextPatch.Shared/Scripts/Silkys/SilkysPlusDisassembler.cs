@@ -86,6 +86,11 @@ namespace VNTextPatch.Shared.Scripts.Silkys
             new SilkysSyscalls
             {
                 Exec = 29,
+                ExecSetCharacterName = 7
+            },
+            new SilkysSyscalls
+            {
+                Exec = 29,
                 ExecSetCharacterName = 11
             },
             new SilkysSyscalls

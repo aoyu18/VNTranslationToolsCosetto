@@ -25,6 +25,7 @@ namespace VNTextPatch.Shared.Scripts.Silkys
         private readonly List<int> _littleEndianAddressOffsets = new List<int>();
         private readonly List<int> _bigEndianAddressOffsets = new List<int>();
         private readonly List<Range> _textCodeRanges = new List<Range>();
+        private readonly HashSet<int> _instructionOffsets = new HashSet<int>();
 
         public void Load(ScriptLocation location)
         {
@@ -32,6 +33,7 @@ namespace VNTextPatch.Shared.Scripts.Silkys
             _littleEndianAddressOffsets.Clear();
             _bigEndianAddressOffsets.Clear();
             _textCodeRanges.Clear();
+            _instructionOffsets.Clear();
 
             _disassembler = GetDisassembler();
             if (_disassembler == null)
@@ -44,6 +46,7 @@ namespace VNTextPatch.Shared.Scripts.Silkys
             
             _disassembler.ReadHeader();
             ReadCode();
+            SplitTextRangesAtAddressTargets();
         }
 
         private void ReadCode()
@@ -56,11 +59,49 @@ namespace VNTextPatch.Shared.Scripts.Silkys
             while (_disassembler.Stream.Position < _disassembler.Stream.Length)
             {
                 int instrOffset = (int)_disassembler.Stream.Position;
+                _instructionOffsets.Add(instrOffset);
                 (byte opcode, List<object> operands) = _disassembler.ReadInstruction();
 
                 HandleMessageInstructions(instrOffset, opcode, operands, ref messageStartOffset, ref inRuby);
                 HandleCharacterNameInstructions(opcode, operands, stack);
             }
+        }
+
+        private void SplitTextRangesAtAddressTargets()
+        {
+            List<int> targetOffsets = _littleEndianAddressOffsets
+                .Select(o => _codeOffset + BitConverter.ToInt32(_data, o))
+                .Concat(_bigEndianAddressOffsets.Select(o => _codeOffset + BinaryUtil.FlipEndianness(BitConverter.ToInt32(_data, o))))
+                .Where(o => _instructionOffsets.Contains(o))
+                .Distinct()
+                .OrderBy(o => o)
+                .ToList();
+
+            if (targetOffsets.Count == 0)
+                return;
+
+            List<Range> splitRanges = new List<Range>();
+            foreach (Range range in _textCodeRanges)
+            {
+                int startOffset = range.Offset;
+                int endOffset = range.Offset + range.Length;
+                if (range.Type != ScriptStringType.Message)
+                {
+                    splitRanges.Add(range);
+                    continue;
+                }
+
+                foreach (int targetOffset in targetOffsets.Where(o => o > startOffset && o < endOffset))
+                {
+                    splitRanges.Add(new Range(startOffset, targetOffset - startOffset, range.Type));
+                    startOffset = targetOffset;
+                }
+
+                splitRanges.Add(new Range(startOffset, endOffset - startOffset, range.Type));
+            }
+
+            _textCodeRanges.Clear();
+            _textCodeRanges.AddRange(splitRanges);
         }
 
         private void HandleMessageInstructions(int instrOffset, byte opcode, List<object> operands, ref int messageStartOffset, ref bool inRuby)
@@ -218,11 +259,16 @@ namespace VNTextPatch.Shared.Scripts.Silkys
                 (byte opcode, List<object> operands) = _disassembler.ReadInstruction();
 
                 if (opcode == _opcodes.PushString ||
-                    opcode == _opcodes.Message1 && !_opcodes.IsMessage1Obfuscated ||
-                    opcode == _opcodes.Message2)
+                    opcode == _opcodes.Message1 && !_opcodes.IsMessage1Obfuscated)
                 {
                     Range textRange = (Range)operands[0];
                     result.Append(StringUtil.SjisEncoding.GetString(_data, textRange.Offset, textRange.Length - 1));
+                }
+                else if (opcode == _opcodes.Message2)
+                {
+                    Range textRange = (Range)operands[0];
+                    Encoding encoding = _opcodes.IsMessage1Obfuscated ? Encoding.UTF8 : StringUtil.SjisEncoding;
+                    result.Append(encoding.GetString(_data, textRange.Offset, textRange.Length - 1));
                 }
                 else if (opcode == _opcodes.Message1 && _opcodes.IsMessage1Obfuscated)
                 {
@@ -295,17 +341,13 @@ namespace VNTextPatch.Shared.Scripts.Silkys
                                 writer.Write(_opcodes.EscapeSequence);
                                 writer.Write(EscapeCode.Ruby);
 
-                                writer.Write(_opcodes.Message2);
-                                writer.Write(StringUtil.SjisTunnelEncoding.GetBytes(line.Substring(range.Offset + 1, range.Length - 2)));
-                                writer.Write((byte)0);
+                                WriteMessageString(writer, line.Substring(range.Offset + 1, range.Length - 2));
 
                                 writer.Write(_opcodes.Yield);
                             }
                             else
                             {
-                                writer.Write(_opcodes.Message2);
-                                writer.Write(StringUtil.SjisTunnelEncoding.GetBytes(line.Substring(range.Offset, range.Length)));
-                                writer.Write((byte)0);
+                                WriteMessageString(writer, line.Substring(range.Offset, range.Length));
                             }
                         }
                     }
@@ -313,6 +355,13 @@ namespace VNTextPatch.Shared.Scripts.Silkys
             }
 
             return result.ToArray();
+        }
+
+        private void WriteMessageString(BinaryWriter writer, string text)
+        {
+            writer.Write(_opcodes.Message2);
+            writer.Write(_opcodes.IsMessage1Obfuscated ? Encoding.UTF8.GetBytes(text) : StringUtil.SjisTunnelEncoding.GetBytes(text));
+            writer.Write((byte)0);
         }
 
         private SilkysDisassemblerBase GetDisassembler()
