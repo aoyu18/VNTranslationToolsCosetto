@@ -29,7 +29,7 @@ namespace VNTextPatch.Shared.Scripts.AdvHd
                 { 0x14, "issb" },   // Message
                 { 0x15, "sb" },     // Character name
                 { 0x16, "bb" },
-                { 0x17, "" },
+                { 0x17, "b" },
                 { 0x18, "bs" },
                 { 0x19, "" },
                 { 0x1A, "s" },
@@ -161,7 +161,7 @@ namespace VNTextPatch.Shared.Scripts.AdvHd
                 { 0xD2, "s" },
                 { 0xD3, "s" },
                 { 0xD4, "shh" },
-                { 0xE6, "ii" },
+                { 0xE6, "aa" },
                 { 0xE7, "" },
                 { 0xE8, "" },
                 { 0xF0, "b" },
