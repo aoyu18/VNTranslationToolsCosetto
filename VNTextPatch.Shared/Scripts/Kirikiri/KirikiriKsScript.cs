@@ -14,11 +14,13 @@ namespace VNTextPatch.Shared.Scripts.Kirikiri
 
         private static readonly Regex PlainRubyRegex = new Regex(@"\[(?<text>[^/\]]+?)/(?<ruby>[^\]]+?)\]", RegexOptions.Compiled);
 
+        private static readonly Regex NameRegex = new Regex(@"\【(?<command>.+?)\】", RegexOptions.Compiled);
+
         private static readonly string[] NameCommands = { "nm", "set_title", "speaker", "Talk", "talk", "cn", "name", "名前" };
         private static readonly string[] EnterNameCommands = { "ns" };
         private static readonly string[] ExitNameCommands = { "nse" };
         private static readonly string[] MessageCommands = { "sel01", "sel02", "sel03", "sel04", "AddSelect", "ruby" };
-        private static readonly string[] AllowedInlineCommands = { "r", "ruby", "ruby_c", "heart", "mruby", "・", "★" };
+        private static readonly string[] AllowedInlineCommands = { "r", "ruby", "ruby_c", "ch", "heart", "mruby", "ルビ", "「", "（", "・", "★" };
 
         private ScriptStringType _currentStringType;
 
@@ -115,6 +117,9 @@ namespace VNTextPatch.Shared.Scripts.Kirikiri
             if (line == "@r")
                 return new[] { new Range(lineOffset, line.Length, ScriptStringType.Message) };
 
+            if (line.StartsWith("@【"))
+                return GetAltNameRanges(lineOffset, line);
+
             Match command = LineCommandRegex.Match(line);
             if (NameCommands.Contains(GetCommandName(command)))
                 return GetAttributeValueRanges(lineOffset, command, ScriptStringType.CharacterName);
@@ -138,6 +143,16 @@ namespace VNTextPatch.Shared.Scripts.Kirikiri
         private IEnumerable<Range> GetNameRanges(int lineOffset, string line)
         {
             yield return new Range(lineOffset + 1, line.Length - 1, ScriptStringType.CharacterName);
+        }
+
+        private IEnumerable<Range> GetAltNameRanges(int lineOffset, string line)
+        {
+            Match commandName = NameRegex.Match(line);
+            if (commandName.Success)
+            {
+                string actorName = commandName.Groups["command"].Value;
+                yield return new Range(lineOffset + 2, actorName.Length, ScriptStringType.CharacterName);
+            }
         }
 
         private IEnumerable<Range> GetMessageRanges(int lineOffset, string line)
@@ -220,6 +235,7 @@ namespace VNTextPatch.Shared.Scripts.Kirikiri
             string text = base.GetTextForRead(range);
             text = text.Replace("\r\n", "");
             text = text.Replace("@r", "\r\n");
+            text = text.Replace("][ch text=", " char=");
             text = ConvertKirikiriRubyToPlain(text);
             text = text.Replace("[l]", "|");
             text = text.Replace("[r]", "\r\n");
